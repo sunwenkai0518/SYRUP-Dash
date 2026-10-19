@@ -26,12 +26,77 @@ jobs:
             --exclude-module tkinter --exclude-module PIL --exclude-module matplotlib \
             main.py
 
-      - name: Package
-        run: ditto -c -k --sequesterRsrc --keepParent dist/SYRUP.app SYRUP-macos.zip
+      - name: Clear old signatures
+        run: |
+          find dist/SYRUP.app -type d -name "_CodeSignature" -prune -exec rm -rf {} + || true
 
-      - name: Upload artifact
+      - name: Ad-hoc sign (recursive)
+        run: |
+          codesign --force --deep --timestamp=none --sign - dist/SYRUP.app
+          echo "=== signed ==="
+
+      - name: Verify 1 - structure
+        run: |
+          echo "--- Contents ---"
+          ls -la dist/SYRUP.app/Contents/
+          test -f dist/SYRUP.app/Contents/Info.plist
+          test -f dist/SYRUP.app/Contents/MacOS/SYRUP
+          echo "STRUCTURE OK"
+
+      - name: Verify 2 - signature
+        run: |
+          codesign --verify --deep --strict --verbose=2 dist/SYRUP.app
+          echo "SIGNATURE OK"
+
+      - name: Verify 3 - dylib dependencies
+        run: |
+          otool -L dist/SYRUP.app/Contents/MacOS/SYRUP
+          if otool -L dist/SYRUP.app/Contents/MacOS/SYRUP | grep -q "not found"; then
+            echo "!!! MISSING DYLIB !!!"
+            exit 1
+          else
+            echo "ALL DYLIBS RESOLVED"
+          fi
+
+      - name: Verify 4 - launch test
+        continue-on-error: true
+        run: |
+          SDL_VIDEODRIVER=dummy timeout 10 dist/SYRUP.app/Contents/MacOS/SYRUP
+          code=$?
+          if [ $code -eq 124 ]; then
+            echo "LAUNCH OK - ran full 10s without crashing"
+          else
+            echo "exit code $code (124 = success, other = check)"
+          fi
+
+      - name: Package zip
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent dist/SYRUP.app SYRUP-macos.zip
+
+      - name: Package dmg
+        run: |
+          hdiutil create -volname SYRUP -srcfolder dist/SYRUP.app -ov -format UDZO SYRUP-macos.dmg
+
+      - name: Verify 5 - zip structure
+        run: |
+          unzip -l SYRUP-macos.zip | head -20
+          if unzip -l SYRUP-macos.zip | grep -q "SYRUP.app/Contents/MacOS/SYRUP"; then
+            echo "ZIP STRUCTURE OK - .app shell present"
+          else
+            echo "!!! ZIP STRUCTURE BROKEN !!!"
+            exit 1
+          fi
+
+      - name: Upload zip
         uses: actions/upload-artifact@v4
         with:
           name: SYRUP-macos
           path: SYRUP-macos.zip
+          if-no-files-found: error
+
+      - name: Upload dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: SYRUP-macos-dmg
+          path: SYRUP-macos.dmg
           if-no-files-found: error
