@@ -61,12 +61,16 @@ jobs:
       - name: Verify 4 - launch test
         continue-on-error: true
         run: |
-          SDL_VIDEODRIVER=dummy timeout 10 dist/SYRUP.app/Contents/MacOS/SYRUP
-          code=$?
-          if [ $code -eq 124 ]; then
+          SDL_VIDEODRIVER=dummy ./dist/SYRUP.app/Contents/MacOS/SYRUP &
+          PID=$!
+          sleep 10
+          if kill -0 $PID 2>/dev/null; then
             echo "LAUNCH OK - ran full 10s without crashing"
+            kill $PID 2>/dev/null
           else
-            echo "exit code $code (124 = success, other = check)"
+            wait $PID
+            echo "process exited early with code $?"
+          fi
           fi
 
       - name: Package zip
